@@ -8,6 +8,7 @@ import { createServer } from 'http';
 import authRoutes from './routes/auth.routes';
 import templateRoutes from './routes/template.routes';
 import itemRoutes from './routes/item.routes';
+import transitionRoutes from './routes/transition.routes';
 
 dotenv.config();
 
@@ -39,6 +40,7 @@ app.use((req, _res, next) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/items', itemRoutes);
+app.use('/api/transitions', transitionRoutes);
 
 // ============ Health Check ============
 app.get('/health', async (_req, res) => {
@@ -71,7 +73,7 @@ app.use((_req, res) => {
 
 // ============ Global Error Handler ============
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error('Error:', err);
+  console.error('🔥 Error:', err);
   
   const status = err.status || 500;
   const message = err.message || 'Internal Server Error';
@@ -93,36 +95,37 @@ async function startServer() {
 
     server.listen(PORT, () => {
       console.log('\n==================================');
-      console.log(`Server running on port ${PORT}`);
-      console.log(`Health: http://localhost:${PORT}/health`);
-      console.log(`Auth: http://localhost:${PORT}/api/auth`);
-      console.log(`Templates: http://localhost:${PORT}/api/templates`);
-      console.log(`Items: http://localhost:${PORT}/api/items`);
-      console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`📍 Health: http://localhost:${PORT}/health`);
+      console.log(`🔐 Auth: http://localhost:${PORT}/api/auth`);
+      console.log(`📋 Templates: http://localhost:${PORT}/api/templates`);
+      console.log(`📦 Items: http://localhost:${PORT}/api/items`);
+      console.log(`🔄 Transitions: http://localhost:${PORT}/api/transitions`);
+      console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log('==================================\n');
     });
 
   } catch (error: any) {
-    console.error('Failed to start server:', error.message);
-    console.error('Make sure PostgreSQL is running on localhost:5432');
+    console.error('❌ Failed to start server:', error.message);
+    console.error('💡 Make sure PostgreSQL is running on localhost:5432');
     process.exit(1);
   }
 }
 
 process.on('SIGTERM', async () => {
-  console.log('SIGTERM received, shutting down gracefully...');
+  console.log('🛑 SIGTERM received, shutting down gracefully...');
   await prisma.$disconnect();
   server.close(() => {
-    console.log('Server closed');
+    console.log('✅ Server closed');
     process.exit(0);
   });
 });
 
 process.on('SIGINT', async () => {
-  console.log('SIGINT received, shutting down gracefully...');
+  console.log('🛑 SIGINT received, shutting down gracefully...');
   await prisma.$disconnect();
   server.close(() => {
-    console.log('Server closed');
+    console.log('✅ Server closed');
     process.exit(0);
   });
 });

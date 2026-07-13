@@ -1,20 +1,4 @@
 import { prisma } from '../app';
-import { Prisma } from '@prisma/client';
-
-// Type guard for checking if data has specific properties
-function isAuditData(data: any): data is {
-  initialStage?: string;
-  assignedUsers?: number[];
-  title?: string;
-  description?: string;
-  dueDate?: string;
-  priority?: string;
-  toStage?: string;
-  fields?: any;
-  users?: number[];
-} {
-  return data && typeof data === 'object' && !Array.isArray(data);
-}
 
 export class AuditService {
   async createAuditEvent(data: {
