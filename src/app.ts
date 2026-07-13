@@ -6,6 +6,7 @@ import { createServer } from 'http';
 
 // Import routes
 import authRoutes from './routes/auth.routes';
+import templateRoutes from './routes/template.routes';
 
 dotenv.config();
 
@@ -35,6 +36,7 @@ app.use((req, _res, next) => {
 
 // ============ Routes ============
 app.use('/api/auth', authRoutes);
+app.use('/api/templates', templateRoutes);
 
 // ============ Health Check ============
 app.get('/health', async (_req, res) => {
@@ -92,6 +94,7 @@ async function startServer() {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📍 Health: http://localhost:${PORT}/health`);
       console.log(`🔐 Auth: http://localhost:${PORT}/api/auth`);
+      console.log(`📋 Templates: http://localhost:${PORT}/api/templates`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log('==================================\n');
     });
