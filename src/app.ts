@@ -4,6 +4,9 @@ import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 import { createServer } from 'http';
 
+// Import routes
+import authRoutes from './routes/auth.routes';
+
 dotenv.config();
 
 export const prisma = new PrismaClient({
@@ -30,6 +33,9 @@ app.use((req, _res, next) => {
   next();
 });
 
+// ============ Routes ============
+app.use('/api/auth', authRoutes);
+
 // ============ Health Check ============
 app.get('/health', async (_req, res) => {
   try {
@@ -50,13 +56,6 @@ app.get('/health', async (_req, res) => {
     });
   }
 });
-
-// ============ Routes ============
-// app.use('/api/auth', authRoutes);
-// app.use('/api/templates', templateRoutes);
-// app.use('/api/items', itemRoutes);
-// app.use('/api/transitions', transitionRoutes);
-// app.use('/api/attachments', attachmentRoutes);
 
 // ============ 404 Handler ============
 app.use((_req, res) => {
@@ -92,6 +91,7 @@ async function startServer() {
       console.log('\n==================================');
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📍 Health: http://localhost:${PORT}/health`);
+      console.log(`🔐 Auth: http://localhost:${PORT}/api/auth`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log('==================================\n');
     });
