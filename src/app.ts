@@ -9,6 +9,7 @@ import authRoutes from './routes/auth.routes';
 import templateRoutes from './routes/template.routes';
 import itemRoutes from './routes/item.routes';
 import transitionRoutes from './routes/transition.routes';
+import attachmentRoutes from './routes/attachment.routes';
 
 // Import queue
 import { 
@@ -38,7 +39,8 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-app.use('/uploads', express.static('uploads'));
+// Static files for uploads
+app.use('/uploads', express.static(process.env.UPLOAD_DIR || './uploads'));
 
 // ============ Request Logging ============
 app.use((req, _res, next) => {
@@ -51,6 +53,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/items', itemRoutes);
 app.use('/api/transitions', transitionRoutes);
+app.use('/api', attachmentRoutes); // /api/items/:id/attachments, /api/attachments/:id
 
 // ============ Health Check ============
 app.get('/health', async (_req, res) => {
@@ -141,17 +144,20 @@ const PORT = process.env.PORT || 3000;
 
 async function startServer() {
   try {
-    // Connect to database
+    // Create uploads directory
+    const uploadDir = process.env.UPLOAD_DIR || './uploads';
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+
     await prisma.$connect();
     console.log('✅ Database connected successfully');
 
-    // Process pending notifications on startup (crash recovery)
     const pendingCount = await processPendingNotifications();
     if (pendingCount > 0) {
       console.log(`📨 ${pendingCount} pending notifications queued`);
     }
 
-    // Start server
     server.listen(PORT, () => {
       console.log('\n==================================');
       console.log(`🚀 Server running on port ${PORT}`);
@@ -161,6 +167,7 @@ async function startServer() {
       console.log(`📦 Items: http://localhost:${PORT}/api/items`);
       console.log(`🔄 Transitions: http://localhost:${PORT}/api/transitions`);
       console.log(`📨 Queue: http://localhost:${PORT}/api/queue/status`);
+      console.log(`📎 Attachments: http://localhost:${PORT}/api/items/:id/attachments`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log('==================================\n');
     });
@@ -171,6 +178,9 @@ async function startServer() {
     process.exit(1);
   }
 }
+
+// Import fs for directory creation
+import fs from 'fs';
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
