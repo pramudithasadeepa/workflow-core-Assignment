@@ -3,6 +3,24 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 import { createServer } from 'http';
+import fs from 'fs';
+
+// Import routes
+import authRoutes from './routes/auth.routes';
+import templateRoutes from './routes/template.routes';
+import itemRoutes from './routes/item.routes';
+import transitionRoutes from './routes/transition.routes';
+import attachmentRoutes from './routes/attachment.routes';
+
+// Import queue
+import { 
+  notificationWorker, 
+  processPendingNotifications, 
+  closeQueue 
+} from './queues/notification.queue';
+
+// Import redis client
+import { redisClient } from './config/redis.config';
 
 dotenv.config();
 
@@ -22,13 +40,25 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-app.use('/uploads', express.static('uploads'));
+// Static files for uploads
+const uploadDir = process.env.UPLOAD_DIR || './uploads';
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+app.use('/uploads', express.static(uploadDir));
 
 // ============ Request Logging ============
 app.use((req, _res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
   next();
 });
+
+// ============ Routes ============
+app.use('/api/auth', authRoutes);
+app.use('/api/templates', templateRoutes);
+app.use('/api/items', itemRoutes);
+app.use('/api/transitions', transitionRoutes);
+app.use('/api', attachmentRoutes);
 
 // ============ Health Check ============
 app.get('/health', async (_req, res) => {
@@ -51,12 +81,46 @@ app.get('/health', async (_req, res) => {
   }
 });
 
-// ============ Routes ============
-// app.use('/api/auth', authRoutes);
-// app.use('/api/templates', templateRoutes);
-// app.use('/api/items', itemRoutes);
-// app.use('/api/transitions', transitionRoutes);
-// app.use('/api/attachments', attachmentRoutes);
+// ============ Notification Queue Status ============
+app.get('/api/queue/status', async (_req, res) => {
+  try {
+    const counts = await prisma.notification.groupBy({
+      by: ['status'],
+      _count: true
+    });
+
+    const queueCounts = {
+      pending: counts.find(c => c.status === 'PENDING')?._count || 0,
+      processing: counts.find(c => c.status === 'PROCESSING')?._count || 0,
+      completed: counts.find(c => c.status === 'COMPLETED')?._count || 0,
+      failed: counts.find(c => c.status === 'FAILED')?._count || 0
+    };
+
+    res.json({
+      success: true,
+      data: queueCounts
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      error: error.message
+    });
+  }
+});
+
+// ============ Force Process Pending Notifications ============
+app.post('/api/queue/process', async (_req, res) => {
+  try {
+    const count = await processPendingNotifications();
+    res.json({
+      success: true,
+      message: `Queued ${count} pending notifications`
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      error: error.message
+    });
+  }
+});
 
 // ============ 404 Handler ============
 app.use((_req, res) => {
@@ -85,26 +149,46 @@ const PORT = process.env.PORT || 3000;
 
 async function startServer() {
   try {
+    // Create uploads directory
+    const uploadDir = process.env.UPLOAD_DIR || './uploads';
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+
     await prisma.$connect();
     console.log('✅ Database connected successfully');
+
+    const pendingCount = await processPendingNotifications();
+    if (pendingCount > 0) {
+      console.log(`📨 ${pendingCount} pending notifications queued`);
+    }
 
     server.listen(PORT, () => {
       console.log('\n==================================');
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📍 Health: http://localhost:${PORT}/health`);
+      console.log(`🔐 Auth: http://localhost:${PORT}/api/auth`);
+      console.log(`📋 Templates: http://localhost:${PORT}/api/templates`);
+      console.log(`📦 Items: http://localhost:${PORT}/api/items`);
+      console.log(`🔄 Transitions: http://localhost:${PORT}/api/transitions`);
+      console.log(`📨 Queue: http://localhost:${PORT}/api/queue/status`);
+      console.log(`📎 Attachments: http://localhost:${PORT}/api/items/:id/attachments`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log('==================================\n');
     });
 
   } catch (error: any) {
     console.error('❌ Failed to start server:', error.message);
-    console.error('💡 Make sure PostgreSQL is running on localhost:5432');
+    console.error('💡 Make sure PostgreSQL and Redis are running');
     process.exit(1);
   }
 }
 
+// Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('🛑 SIGTERM received, shutting down gracefully...');
+  await closeQueue();
+  await redisClient.quit();
   await prisma.$disconnect();
   server.close(() => {
     console.log('✅ Server closed');
@@ -114,6 +198,8 @@ process.on('SIGTERM', async () => {
 
 process.on('SIGINT', async () => {
   console.log('🛑 SIGINT received, shutting down gracefully...');
+  await closeQueue();
+  await redisClient.quit();
   await prisma.$disconnect();
   server.close(() => {
     console.log('✅ Server closed');
@@ -121,6 +207,11 @@ process.on('SIGINT', async () => {
   });
 });
 
-startServer();
+// Only start server if not in test environment with a port already set
+if (process.env.NODE_ENV !== 'test' || !process.env.PORT) {
+  startServer();
+} else {
+  console.log(`🧪 Test environment - server will start on port ${process.env.PORT} when tests run`);
+}
 
 export { server };

@@ -7,15 +7,156 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ============================================
+// USER MODEL
+// ============================================
 model User {
   id           Int      @id @default(autoincrement())
   email        String   @unique
   passwordHash String   @map("password_hash")
   name         String
-  role         String   @default("CLIENT")
+  role         Role     @default(CLIENT)
   rating       Float?   @default(0)
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
   
+  // Relations
+  workflowTemplates WorkflowTemplate[] @relation("TemplateCreator")
+  workflowItems     WorkflowItem[]     @relation("ItemCreator")
+  auditEvents       AuditEvent[]       @relation("AuditActor")
+  notifications     Notification[]     @relation("NotificationRecipient")
+  attachments       Attachment[]       @relation("AttachmentUploader")
+  
   @@map("users")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  REVIEWER
+  CLIENT
+  PROVIDER
+  VENDOR
+  BUYER
+  REQUESTER
+  BIDDER
+}
+
+// ============================================
+// WORKFLOW TEMPLATE MODEL
+// ============================================
+model WorkflowTemplate {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  stages      Json     // ["Draft", "Review", "Approval", "Completed"]
+  transitions Json     // {"Draft": ["Review"], "Review": ["Approval", "Rejected"]}
+  permissions Json     // {"Review": ["ADMIN", "MANAGER"], "Approval": ["ADMIN"]}
+  version     Int      @default(1)
+  createdById Int      @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  
+  // Relations
+  createdBy User          @relation("TemplateCreator", fields: [createdById], references: [id])
+  items     WorkflowItem[]
+  
+  @@map("workflow_templates")
+}
+
+// ============================================
+// WORKFLOW ITEM MODEL
+// ============================================
+model WorkflowItem {
+  id            Int      @id @default(autoincrement())
+  templateId    Int      @map("template_id")
+  currentStage  String   @map("current_stage")
+  assignedUsers Int[]    @map("assigned_users")  // Array of user IDs
+  title         String
+  description   String?
+  dueDate       DateTime? @map("due_date")
+  priority      String?  @default("MEDIUM")
+  metadata      Json?    // Custom fields
+  version       Int      @default(1)  // For optimistic locking
+  createdById   Int      @map("created_by_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  
+  // Relations
+  template     WorkflowTemplate @relation(fields: [templateId], references: [id])
+  createdBy    User             @relation("ItemCreator", fields: [createdById], references: [id])
+  auditEvents  AuditEvent[]
+  attachments  Attachment[]
+  notifications Notification[]
+  
+  @@index([templateId])
+  @@index([currentStage])
+  @@index([assignedUsers])
+  @@map("workflow_items")
+}
+
+// ============================================
+// AUDIT EVENT MODEL (Immutable Ledger)
+// ============================================
+model AuditEvent {
+  id              Int      @id @default(autoincrement())
+  workflowItemId  Int      @map("workflow_item_id")
+  eventType       String   @map("event_type")  // CREATED, TRANSITIONED, COMMENTED, ATTACHED, FIELD_UPDATED, ASSIGNED
+  data            Json     // Full event payload
+  actorId         Int      @map("actor_id")
+  timestamp       DateTime @default(now()) @map("timestamp")
+  
+  // Relations
+  workflowItem WorkflowItem @relation(fields: [workflowItemId], references: [id])
+  actor        User         @relation("AuditActor", fields: [actorId], references: [id])
+  
+  @@index([workflowItemId])
+  @@index([timestamp])
+  @@map("audit_events")
+}
+
+// ============================================
+// ATTACHMENT MODEL (With Versioning)
+// ============================================
+model Attachment {
+  id             Int      @id @default(autoincrement())
+  workflowItemId Int      @map("workflow_item_id")
+  fileName       String   @map("file_name")
+  filePath       String   @map("file_path")
+  fileSize       Int      @map("file_size")
+  mimeType       String   @map("mime_type")
+  version        Int      @default(1)
+  uploadedById   Int      @map("uploaded_by_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  
+  // Relations
+  workflowItem WorkflowItem @relation(fields: [workflowItemId], references: [id])
+  uploadedBy   User         @relation("AttachmentUploader", fields: [uploadedById], references: [id])
+  
+  @@index([workflowItemId])
+  @@map("attachments")
+}
+
+// ============================================
+// NOTIFICATION MODEL (Durable Queue)
+// ============================================
+model Notification {
+  id             Int      @id @default(autoincrement())
+  workflowItemId Int      @map("workflow_item_id")
+  recipientId    Int      @map("recipient_id")
+  eventType      String   @map("event_type")
+  payload        Json
+  status         String   @default("PENDING")  // PENDING, PROCESSING, COMPLETED, FAILED
+  retryCount     Int      @default(0) @map("retry_count")
+  createdAt      DateTime @default(now()) @map("created_at")
+  processedAt    DateTime? @map("processed_at")
+  
+  // Relations
+  workflowItem WorkflowItem @relation(fields: [workflowItemId], references: [id])
+  recipient    User         @relation("NotificationRecipient", fields: [recipientId], references: [id])
+  
+  @@index([workflowItemId])
+  @@index([recipientId])
+  @@index([status])
+  @@map("notifications")
 }
