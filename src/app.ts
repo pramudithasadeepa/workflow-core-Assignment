@@ -10,6 +10,16 @@ import templateRoutes from './routes/template.routes';
 import itemRoutes from './routes/item.routes';
 import transitionRoutes from './routes/transition.routes';
 
+// Import queue
+import { 
+  notificationWorker, 
+  processPendingNotifications, 
+  closeQueue 
+} from './queues/notification.queue';
+
+// Import redis client
+import { redisClient } from './config/redis.config';
+
 dotenv.config();
 
 export const prisma = new PrismaClient({
@@ -63,6 +73,47 @@ app.get('/health', async (_req, res) => {
   }
 });
 
+// ============ Notification Queue Status ============
+app.get('/api/queue/status', async (_req, res) => {
+  try {
+    const counts = await prisma.notification.groupBy({
+      by: ['status'],
+      _count: true
+    });
+
+    const queueCounts = {
+      pending: counts.find(c => c.status === 'PENDING')?._count || 0,
+      processing: counts.find(c => c.status === 'PROCESSING')?._count || 0,
+      completed: counts.find(c => c.status === 'COMPLETED')?._count || 0,
+      failed: counts.find(c => c.status === 'FAILED')?._count || 0
+    };
+
+    res.json({
+      success: true,
+      data: queueCounts
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      error: error.message
+    });
+  }
+});
+
+// ============ Force Process Pending Notifications ============
+app.post('/api/queue/process', async (_req, res) => {
+  try {
+    const count = await processPendingNotifications();
+    res.json({
+      success: true,
+      message: `Queued ${count} pending notifications`
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      error: error.message
+    });
+  }
+});
+
 // ============ 404 Handler ============
 app.use((_req, res) => {
   res.status(404).json({
@@ -90,9 +141,17 @@ const PORT = process.env.PORT || 3000;
 
 async function startServer() {
   try {
+    // Connect to database
     await prisma.$connect();
     console.log('✅ Database connected successfully');
 
+    // Process pending notifications on startup (crash recovery)
+    const pendingCount = await processPendingNotifications();
+    if (pendingCount > 0) {
+      console.log(`📨 ${pendingCount} pending notifications queued`);
+    }
+
+    // Start server
     server.listen(PORT, () => {
       console.log('\n==================================');
       console.log(`🚀 Server running on port ${PORT}`);
@@ -101,19 +160,23 @@ async function startServer() {
       console.log(`📋 Templates: http://localhost:${PORT}/api/templates`);
       console.log(`📦 Items: http://localhost:${PORT}/api/items`);
       console.log(`🔄 Transitions: http://localhost:${PORT}/api/transitions`);
+      console.log(`📨 Queue: http://localhost:${PORT}/api/queue/status`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log('==================================\n');
     });
 
   } catch (error: any) {
     console.error('❌ Failed to start server:', error.message);
-    console.error('💡 Make sure PostgreSQL is running on localhost:5432');
+    console.error('💡 Make sure PostgreSQL and Redis are running');
     process.exit(1);
   }
 }
 
+// Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('🛑 SIGTERM received, shutting down gracefully...');
+  await closeQueue();
+  await redisClient.quit();
   await prisma.$disconnect();
   server.close(() => {
     console.log('✅ Server closed');
@@ -123,6 +186,8 @@ process.on('SIGTERM', async () => {
 
 process.on('SIGINT', async () => {
   console.log('🛑 SIGINT received, shutting down gracefully...');
+  await closeQueue();
+  await redisClient.quit();
   await prisma.$disconnect();
   server.close(() => {
     console.log('✅ Server closed');
