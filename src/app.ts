@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 import { createServer } from 'http';
+import fs from 'fs';
 
 // Import routes
 import authRoutes from './routes/auth.routes';
@@ -40,7 +41,11 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Static files for uploads
-app.use('/uploads', express.static(process.env.UPLOAD_DIR || './uploads'));
+const uploadDir = process.env.UPLOAD_DIR || './uploads';
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+app.use('/uploads', express.static(uploadDir));
 
 // ============ Request Logging ============
 app.use((req, _res, next) => {
@@ -53,7 +58,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/items', itemRoutes);
 app.use('/api/transitions', transitionRoutes);
-app.use('/api', attachmentRoutes); // /api/items/:id/attachments, /api/attachments/:id
+app.use('/api', attachmentRoutes);
 
 // ============ Health Check ============
 app.get('/health', async (_req, res) => {
@@ -179,9 +184,6 @@ async function startServer() {
   }
 }
 
-// Import fs for directory creation
-import fs from 'fs';
-
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('🛑 SIGTERM received, shutting down gracefully...');
@@ -205,6 +207,11 @@ process.on('SIGINT', async () => {
   });
 });
 
-startServer();
+// Only start server if not in test environment with a port already set
+if (process.env.NODE_ENV !== 'test' || !process.env.PORT) {
+  startServer();
+} else {
+  console.log(`🧪 Test environment - server will start on port ${process.env.PORT} when tests run`);
+}
 
 export { server };

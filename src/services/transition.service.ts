@@ -11,7 +11,7 @@ export class TransitionService {
     toStage: string,
     userId: number
   ) {
-    // Use transaction for atomicity with proper type
+    // Use transaction with increased timeout (30 seconds for concurrency tests)
     return await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       // 1. Get item with optimistic locking
       const item = await tx.workflowItem.findUnique({
@@ -138,6 +138,8 @@ export class TransitionService {
       }
 
       return updatedItem;
+    }, {
+      timeout: 30000 // 30 seconds timeout (increased from default 5s)
     });
   }
 

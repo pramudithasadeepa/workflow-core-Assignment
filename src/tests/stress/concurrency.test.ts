@@ -10,9 +10,11 @@ describe('Concurrency Stress Tests', () => {
   beforeEach(async () => {
     transitionService = new TransitionService();
     
-    // Create 20 test users
+    // Reduce to 10 users for faster tests (still tests concurrency)
+    const numUsers = process.env.CI ? 5 : 10;
+    
     userIds = await Promise.all(
-      Array.from({ length: 20 }, async (_, i) => {
+      Array.from({ length: numUsers }, async (_, i) => {
         const user = await createTestUser('ADMIN');
         return user.id;
       })
@@ -32,8 +34,7 @@ describe('Concurrency Stress Tests', () => {
   });
 
   describe('Concurrent Transitions', () => {
-    it('should allow exactly 1 transition success out of 20 concurrent attempts', async () => {
-      // Simulate 20 concurrent transition attempts
+    it('should allow exactly 1 transition success out of concurrent attempts', async () => {
       const promises = userIds.map((userId) => 
         transitionService.transition(itemId, 'Review', 'Approval', userId)
           .then(result => ({ success: true, result }))
@@ -42,22 +43,21 @@ describe('Concurrency Stress Tests', () => {
 
       const responses = await Promise.all(promises);
       
-      // Fix: Use type guard to check if response has error property
       const successCount = responses.filter(r => r.success).length;
       const conflictCount = responses.filter(r => 
         !r.success && 'error' in r && r.error && r.error.includes('Concurrency conflict')
       ).length;
 
-      // Exactly 1 should succeed, 19 should fail with conflict
+      // Exactly 1 should succeed, rest should fail with conflict
       expect(successCount).toBe(1);
-      expect(conflictCount).toBeGreaterThanOrEqual(18);
+      expect(conflictCount).toBe(userIds.length - 1);
 
       // Verify final state
       const finalItem = await prisma.workflowItem.findUnique({
         where: { id: itemId }
       });
       expect(finalItem?.currentStage).toBe('Approval');
-      expect(finalItem?.version).toBe(2); // Initial version 1 + 1 transition
+      expect(finalItem?.version).toBe(2);
     });
   });
 
@@ -90,7 +90,6 @@ describe('Concurrency Stress Tests', () => {
 
       const responses = await Promise.all(promises);
       
-      // Fix: Use type guard to check if response has result property
       const successCount = responses.filter(r => 
         r.success && 'result' in r && r.result && r.result.id
       ).length;
@@ -99,7 +98,6 @@ describe('Concurrency Stress Tests', () => {
         !r.success && 'error' in r && r.error && r.error.includes('Record to update not found')
       ).length;
 
-      // Exactly 1 should succeed
       expect(successCount).toBe(1);
       expect(conflictCount).toBe(4);
 

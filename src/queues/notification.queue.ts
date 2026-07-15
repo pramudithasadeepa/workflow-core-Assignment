@@ -6,7 +6,7 @@ import { prisma } from '../app';
 export const notificationQueue = new Queue('notifications', {
   connection: redisConnection,
   defaultJobOptions: {
-    attempts: 3,
+    attempts: 2,
     backoff: {
       type: 'exponential',
       delay: 1000
@@ -25,6 +25,16 @@ export const notificationWorker = new Worker(
     try {
       console.log(`📨 Processing notification ${notificationId}...`);
 
+      // First check if notification exists
+      const existingNotification = await prisma.notification.findUnique({
+        where: { id: notificationId }
+      });
+
+      if (!existingNotification) {
+        console.log(`⚠️ Notification ${notificationId} not found, skipping...`);
+        return { success: false, error: 'Notification not found' };
+      }
+
       // Mark as processing
       const notification = await prisma.notification.update({
         where: { id: notificationId },
@@ -33,7 +43,6 @@ export const notificationWorker = new Worker(
         }
       });
 
-      // Simulate sending notification (email, push, etc.)
       console.log(`📧 [Notification] Sending to user ${notification.recipientId}:`, notification.payload);
 
       // Simulate processing time
@@ -54,21 +63,27 @@ export const notificationWorker = new Worker(
     } catch (error: any) {
       console.error(`❌ Failed to process notification ${notificationId}:`, error.message);
 
-      // Mark as failed
-      await prisma.notification.update({
-        where: { id: notificationId },
-        data: {
-          status: 'FAILED',
-          retryCount: { increment: 1 }
-        }
+      // Check if notification still exists before updating
+      const exists = await prisma.notification.findUnique({
+        where: { id: notificationId }
       });
+
+      if (exists) {
+        await prisma.notification.update({
+          where: { id: notificationId },
+          data: {
+            status: 'FAILED',
+            retryCount: { increment: 1 }
+          }
+        });
+      }
 
       throw error;
     }
   },
   { 
     connection: redisConnection,
-    concurrency: 5 // Process 5 notifications simultaneously
+    concurrency: 5
   }
 );
 
@@ -89,7 +104,7 @@ notificationWorker.on('error', (error) => {
   console.error('❌ Worker error:', error.message);
 });
 
-// Process pending notifications from database (crash recovery)
+// Process pending notifications from database
 export async function processPendingNotifications() {
   try {
     console.log('🔄 Checking for pending notifications...');
@@ -99,7 +114,7 @@ export async function processPendingNotifications() {
         status: 'PENDING'
       },
       orderBy: { createdAt: 'asc' },
-      take: 100 // Process 100 at a time
+      take: 100
     });
 
     if (pending.length === 0) {
@@ -113,7 +128,7 @@ export async function processPendingNotifications() {
       await notificationQueue.add('send-notification', {
         notificationId: notification.id
       }, {
-        jobId: `notification-${notification.id}` // Deduplicate
+        jobId: `notification-${notification.id}`
       });
     }
 
@@ -156,7 +171,11 @@ export async function enqueueNotification(
 
 // Graceful shutdown
 export async function closeQueue() {
-  await notificationWorker.close();
-  await notificationQueue.close();
-  console.log('🛑 Queue closed');
+  try {
+    await notificationWorker.close();
+    await notificationQueue.close();
+    console.log('🛑 Queue closed');
+  } catch (error) {
+    console.log('⚠️ Queue already closed');
+  }
 }
